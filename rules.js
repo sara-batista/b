@@ -8,8 +8,6 @@ export const TASK_TERMS = [
   'validacao de comprovante'
 ];
 
-const REPORT_CODE = 'Kju5G9GOJbU7cHRcMb%2BRBA%3D%3D';
-
 export function normalizeText(value) {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
@@ -42,9 +40,11 @@ export function buildAssignmentsUrl(origin, page) {
   const params = url.searchParams;
   params.set('pagenumber', String(page));
   params.set('simulation', 'N');
-  params.set('codreport', REPORT_CODE);
-  params.set('reporttype', 'mytasks');
+  params.set('codreport', '');
+  params.set('filterCombo', '');
+  params.set('reporttype', '');
   params.set('codflowexecute', '');
+  params.set('codflowsorservices', '');
   params.set('codtask', '');
   params.set('taskstatus', 'S');
   params.set('field', '');
@@ -57,14 +57,16 @@ export function buildAssignmentsUrl(origin, page) {
   params.set('tasklate', 'Late');
   params.set('startbegin', '');
   params.set('startend', '');
-  params.set('sortfield', 'dt');
+  params.set('sortfield', '');
   params.set('sortdirection', 'ASC');
+  params.set('keyword', '');
   return url.toString();
 }
 
 export async function loadBlockingTasks({
   origin,
   fetchImpl = fetch,
+  antiforgeryToken = null,
   maxPages = 30,
   timeoutMs = 10000
 }) {
@@ -76,11 +78,17 @@ export async function loadBlockingTasks({
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let response;
     try {
+      const headers = { Accept: 'application/json' };
+      // O helper GET do Zeev envia este cabeçalho quando o campo existe,
+      // inclusive se o valor estiver vazio.
+      if (antiforgeryToken !== null) {
+        headers['X-SML-AntiForgeryToken'] = antiforgeryToken;
+      }
       response = await fetchImpl(buildAssignmentsUrl(origin, page), {
         method: 'GET',
         credentials: 'include',
         cache: 'no-store',
-        headers: { Accept: 'application/json' },
+        headers,
         signal: controller.signal
       });
     } catch (error) {
