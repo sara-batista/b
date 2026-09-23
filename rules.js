@@ -7,14 +7,40 @@ export const TASK_TERMS = [
   'validar comprovante',
   'validacao de comprovante'
 ];
+export const BLOCKING_ACTIVITY_ALIAS = '[PROCESSO]avaliarAtendimento';
+
+// O filtro codtask usa o ID numérico interno, diferente do código original da atividade.
+// Valores conferidos no filtro de tarefas dos ambientes HML e PRD.
+const BLOCKING_ACTIVITY_FILTERS = {
+  'hmlraizeducacao.zeev.it': {
+    taskId: '19991',
+    flow: '393;ef12f561-bd2a-49a8-be91-28542b6263aa;0;0'
+  },
+  'raizeducacao.zeev.it': {
+    taskId: '16070',
+    flow: '268;314489d5-5790-40b1-b366-56863e76e425;0;0'
+  }
+};
 
 export function normalizeText(value) {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
-export function matchesBlockingTask(task) {
+export function matchesBlockingTask(task, internalTaskId = '') {
   const name = normalizeText(task?.t);
-  return TASK_TERMS.some(term => name.includes(term));
+  if (TASK_TERMS.some(term => name.includes(term))) return true;
+
+  const activityCodes = [
+    task?.instance?.instanceTask?.task?.element?.alias,
+    task?.alias,
+    task?.taskAlias,
+    task?.activityCode,
+    task?.codtask
+  ];
+  return activityCodes.some(code =>
+    String(code ?? '') === BLOCKING_ACTIVITY_ALIAS ||
+    Boolean(internalTaskId && String(code ?? '') === internalTaskId)
+  );
 }
 
 export function isRelevantPage(pathname) {
@@ -34,7 +60,7 @@ export function isRequestAction(element, pathname) {
     normalizeText(button.dataset.action) === 'solicitar';
 }
 
-export function buildAssignmentsUrl(origin, page) {
+export function buildAssignmentsUrl(origin, page, codtask = '', flow = '') {
   if (!Number.isInteger(page) || page < 1) throw new Error('Página inválida');
   const url = new URL('/api/internal/bpms/1.0/assignments', origin);
   const params = url.searchParams;
@@ -44,8 +70,8 @@ export function buildAssignmentsUrl(origin, page) {
   params.set('filterCombo', '');
   params.set('reporttype', '');
   params.set('codflowexecute', '');
-  params.set('codflowsorservices', '');
-  params.set('codtask', '');
+  params.set('codflowsorservices', String(flow));
+  params.set('codtask', String(codtask));
   params.set('taskstatus', 'S');
   params.set('field', '');
   params.set('operator', 'Equal');
@@ -72,8 +98,10 @@ export async function loadBlockingTasks({
 }) {
   const found = [];
   const seen = new Set();
+  const activityFilter = BLOCKING_ACTIVITY_FILTERS[new URL(origin).hostname];
+  const internalTaskId = activityFilter?.taskId || '';
 
-  for (let page = 1; page <= maxPages; page += 1) {
+  async function readPage(page, codtask = '', flow = '') {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let response;
@@ -84,7 +112,7 @@ export async function loadBlockingTasks({
       if (antiforgeryToken !== null) {
         headers['X-SML-AntiForgeryToken'] = antiforgeryToken;
       }
-      response = await fetchImpl(buildAssignmentsUrl(origin, page), {
+      response = await fetchImpl(buildAssignmentsUrl(origin, page, codtask, flow), {
         method: 'GET',
         credentials: 'include',
         cache: 'no-store',
@@ -111,21 +139,45 @@ export async function loadBlockingTasks({
     if (!Array.isArray(items)) {
       throw new Error(`A página ${page} não contém a lista de tarefas esperada.`);
     }
-    if (items.length === 0) return found;
+    return items;
+  }
 
-    for (const task of items) {
-      if (!matchesBlockingTask(task)) continue;
-      const id = String(task.cfetp || task.cfe || `${page}:${found.length}`);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      found.push({
-        id,
-        number: String(task.cfe ?? ''),
-        name: String(task.t ?? ''),
-        due: String(task.el ?? ''),
-        link: String(task.lk ?? '')
-      });
+  function addTask(task, page, filteredByActivity = false) {
+    if (!filteredByActivity && !matchesBlockingTask(task, internalTaskId)) return;
+    const id = String(task.cfetp || task.cfe || `${page}:${found.length}`);
+    if (seen.has(id)) return;
+    seen.add(id);
+    found.push({
+      id,
+      number: String(task.cfe ?? ''),
+      name: String(task.t ?? ''),
+      due: String(task.el ?? ''),
+      link: String(task.lk ?? '')
+    });
+  }
+
+  let hasLateTasks = false;
+  let finished = false;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const items = await readPage(page);
+    if (items.length === 0) {
+      finished = true;
+      break;
     }
+    hasLateTasks = true;
+    for (const task of items) addTask(task, page);
+  }
+  if (!finished) {
+    throw new Error(`A consulta ultrapassou ${maxPages} páginas; o resultado não é confiável.`);
+  }
+  if (found.length || !hasLateTasks || !internalTaskId) return found;
+
+  // O relatório compacto nem sempre inclui o alias. Um filtro específico
+  // identifica a atividade sem depender do nome exibido na tarefa.
+  for (let page = 1; page <= maxPages; page += 1) {
+    const items = await readPage(page, internalTaskId, activityFilter.flow);
+    if (items.length === 0) return found;
+    for (const task of items) addTask(task, page, true);
   }
 
   throw new Error(`A consulta ultrapassou ${maxPages} páginas; o resultado não é confiável.`);
