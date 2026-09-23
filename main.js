@@ -1,16 +1,17 @@
-import { isRelevantPage, isRequestAction, loadBlockingTasks } from './rules.js?v=0.1.1';
+import { isRelevantPage, isRequestAction, loadBlockingTasks } from './rules.js?v=0.2.0';
 
 const INSTANCE_KEY = '__raizBloqueioPendenciasV2';
 const REQUEST_PAGE = window.location.pathname.toLowerCase().startsWith('/2.0/request');
 
 if (isRelevantPage(window.location.pathname) && !window[INSTANCE_KEY]) {
-  window[INSTANCE_KEY] = { version: '0.1.1' };
+  window[INSTANCE_KEY] = { version: '0.2.0' };
   start();
 }
 
 function start() {
   let dialog;
   let content;
+  let errorNotice;
   let state = 'checking';
   let tasks = [];
   let pendingCheck = null;
@@ -21,7 +22,7 @@ function start() {
   document.addEventListener('click', guardClick, true);
   document.addEventListener('submit', guardSubmit, true);
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && state === 'blocked') void verify(true);
+    if (!document.hidden && state === 'blocked') void verify();
   });
 
   if (document.readyState === 'loading') {
@@ -41,8 +42,12 @@ function start() {
     content = document.createElement('div');
     dialog.append(content);
     document.body.append(dialog);
-    if (REQUEST_PAGE) renderDialog();
-    void verify(REQUEST_PAGE);
+    errorNotice = document.createElement('div');
+    errorNotice.id = 'raiz-pendencias-error';
+    errorNotice.setAttribute('role', 'alert');
+    errorNotice.hidden = true;
+    document.body.append(errorNotice);
+    void verify();
   }
 
   function guardClick(event) {
@@ -55,7 +60,7 @@ function start() {
     event.stopImmediatePropagation();
     if (pendingAction) return;
     pendingAction = button;
-    void verify(true).then(result => {
+    void verify().then(result => {
       pendingAction = null;
       if (result !== 'clear' || !button.isConnected) return;
       approvedUntil = Date.now() + 2000;
@@ -76,7 +81,7 @@ function start() {
     const form = event.target;
     const submitter = event.submitter;
     pendingAction = form;
-    void verify(true).then(result => {
+    void verify().then(result => {
       pendingAction = null;
       if (result !== 'clear' || !form.isConnected) return;
       approvedUntil = Date.now() + 2000;
@@ -84,10 +89,10 @@ function start() {
     });
   }
 
-  function verify(showChecking = false) {
+  function verify() {
     if (pendingCheck) return pendingCheck;
     state = 'checking';
-    if (showChecking) renderDialog();
+    if (errorNotice) errorNotice.hidden = true;
 
     const tokenInput = document.querySelector('input[name="__RequestVerificationToken"]');
     pendingCheck = loadBlockingTasks({
@@ -112,42 +117,34 @@ function start() {
 
   function renderDialog() {
     if (!dialog || !content) return;
-    if (state === 'clear') {
+    if (state !== 'blocked') {
       if (dialog.open) dialog.close();
       content.replaceChildren();
+      if (state === 'error') showErrorNotice();
       return;
     }
+    if (errorNotice) errorNotice.hidden = true;
 
     const title = document.createElement('h2');
     title.id = 'raiz-pendencias-title';
     const message = document.createElement('p');
-    if (state === 'checking') {
-      title.textContent = 'Verificando tarefas pendentes';
-      message.textContent = 'Aguarde a consulta das suas tarefas em atraso.';
-    } else if (state === 'error') {
-      title.textContent = 'Não foi possível verificar as tarefas';
-      message.textContent = 'A consulta falhou. Tente novamente antes de iniciar uma nova solicitação.';
-    } else {
-      title.textContent = 'Tarefas pendentes em atraso';
-      message.textContent = `Você possui ${tasks.length} tarefa(s) em atraso que precisam ser concluídas antes de iniciar outra solicitação.`;
-    }
+    title.textContent = 'Tarefas pendentes em atraso';
+    message.textContent = `Você possui ${tasks.length} tarefa(s) em atraso que precisam ser concluídas antes de iniciar outra solicitação.`;
 
     const parts = [title, message];
-    if (state === 'blocked') {
-      const list = document.createElement('ul');
-      for (const task of tasks) {
-        const item = document.createElement('li');
-        const link = document.createElement('a');
-        link.textContent = `#${task.number || '?'} — ${task.name}`;
-        link.href = safeTaskLink(task.link);
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        item.append(link);
-        if (task.due) item.append(document.createTextNode(` · Vencimento: ${task.due}`));
-        list.append(item);
-      }
-      parts.push(list);
+    const list = document.createElement('ul');
+    for (const task of tasks) {
+      const item = document.createElement('li');
+      const link = document.createElement('a');
+      link.textContent = `#${task.number || '?'} — ${task.name}`;
+      link.href = safeTaskLink(task.link);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      item.append(link);
+      if (task.due) item.append(document.createTextNode(` · Vencimento: ${task.due}`));
+      list.append(item);
     }
+    parts.push(list);
 
     const actions = document.createElement('div');
     actions.className = 'raiz-pendencias-actions';
@@ -158,12 +155,23 @@ function start() {
     const retry = document.createElement('button');
     retry.type = 'button';
     retry.textContent = 'Verificar novamente';
-    retry.disabled = state === 'checking';
-    retry.addEventListener('click', () => void verify(true));
+    retry.addEventListener('click', () => void verify());
     actions.append(retry);
     parts.push(actions);
     content.replaceChildren(...parts);
     if (!dialog.open) dialog.showModal();
+  }
+
+  function showErrorNotice() {
+    if (!errorNotice) return;
+    const message = document.createElement('span');
+    message.textContent = 'Não foi possível verificar as tarefas. Novas solicitações ficam retidas até a consulta funcionar.';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.textContent = 'Tentar novamente';
+    retry.addEventListener('click', () => void verify());
+    errorNotice.replaceChildren(message, retry);
+    errorNotice.hidden = false;
   }
 
   function safeTaskLink(raw) {
@@ -197,6 +205,14 @@ function addStyles() {
     #raiz-pendencias-dialog button { border: 0; border-radius: 8px; padding: 10px 16px;
       color: #fff; background: #1456a0; cursor: pointer; font: inherit; }
     #raiz-pendencias-dialog button:disabled { opacity: .55; cursor: wait; }
+    #raiz-pendencias-error[hidden] { display: none !important; }
+    #raiz-pendencias-error { position: fixed; right: 16px; bottom: 16px;
+      z-index: 2147483647; width: min(460px, calc(100vw - 32px));
+      display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+      border: 1px solid #d99332; border-radius: 8px; background: #fff8ed;
+      color: #53330b; box-shadow: 0 8px 24px rgba(0,0,0,.18); line-height: 1.4; }
+    #raiz-pendencias-error button { flex: none; border: 0; border-radius: 6px;
+      padding: 8px 10px; color: white; background: #1456a0; cursor: pointer; }
   `;
   document.head.append(style);
 }
