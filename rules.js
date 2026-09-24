@@ -19,7 +19,7 @@ const BLOCKING_CONFIG = {
     },
     // O filtro codtask usa o ID numérico interno, diferente do código original.
     // [PROCESSO] tem filtros conferidos em HML e PRD. O ID de [DP] foi
-    // identificado no modelador PRD; ainda falta confirmar um ID em HML.
+    // conferido no relatório de configurações do aplicativo PRD.
     filters: {
       '[PROCESSO]avaliarAtendimento': {
         'hmlraizeducacao.zeev.it': {
@@ -33,7 +33,7 @@ const BLOCKING_CONFIG = {
       },
       '[DP]avaliarAtendimento': {
         'raizeducacao.zeev.it': {
-          taskId: '29911',
+          taskId: '18227',
           flow: '125;8b786926-94a3-4e6f-8bb6-be0215dfea84;0;0'
         }
       }

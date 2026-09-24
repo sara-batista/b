@@ -1,10 +1,10 @@
-import { isRelevantPage, isRequestAction, loadBlockingTasks, summarizeBlockingTasks } from './rules.js?v=0.8.0';
+import { isRelevantPage, isRequestAction, loadBlockingTasks, summarizeBlockingTasks } from './rules.js?v=0.8.1';
 
 const INSTANCE_KEY = '__raizBloqueioPendenciasV2';
 const REQUEST_PAGE = window.location.pathname.toLowerCase().startsWith('/2.0/request');
 
 if (isRelevantPage(window.location.pathname) && !window[INSTANCE_KEY]) {
-  window[INSTANCE_KEY] = { version: '0.8.0' };
+  window[INSTANCE_KEY] = { version: '0.8.1' };
   start();
 }
 
