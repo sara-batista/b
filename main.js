@@ -1,10 +1,10 @@
-import { isRelevantPage, isRequestAction, loadBlockingTasks } from './rules.js?v=0.6.1';
+import { isRelevantPage, isRequestAction, loadBlockingTasks, summarizeBlockingTasks } from './rules.js?v=0.8.0';
 
 const INSTANCE_KEY = '__raizBloqueioPendenciasV2';
 const REQUEST_PAGE = window.location.pathname.toLowerCase().startsWith('/2.0/request');
 
 if (isRelevantPage(window.location.pathname) && !window[INSTANCE_KEY]) {
-  window[INSTANCE_KEY] = { version: '0.6.1' };
+  window[INSTANCE_KEY] = { version: '0.8.0' };
   start();
 }
 
@@ -124,8 +124,17 @@ function start() {
     const title = document.createElement('h2');
     title.id = 'raiz-pendencias-title';
     const message = document.createElement('p');
-    title.textContent = 'Tarefas pendentes em atraso';
-    message.textContent = `Você possui ${tasks.length} tarefa(s) em atraso que precisam ser concluídas antes de iniciar outra solicitação.`;
+    const { overdueCount, dpRequestCount } = summarizeBlockingTasks(tasks);
+    if (dpRequestCount && overdueCount) {
+      title.textContent = 'Pendências que impedem novas solicitações';
+      message.textContent = `Você possui ${dpRequestCount} solicitação(ões) abertas com tarefas pendentes em Avaliar atendimento de DP e ${overdueCount} tarefa(s) em atraso. Conclua essas tarefas antes de iniciar outra solicitação.`;
+    } else if (dpRequestCount) {
+      title.textContent = 'Avaliações de atendimento de DP pendentes';
+      message.textContent = `Você possui ${dpRequestCount} solicitação(ões) abertas com tarefas pendentes em Avaliar atendimento de DP. Conclua essas tarefas antes de iniciar outra solicitação.`;
+    } else {
+      title.textContent = 'Tarefas pendentes em atraso';
+      message.textContent = `Você possui ${overdueCount} tarefa(s) em atraso que precisam ser concluídas antes de iniciar outra solicitação.`;
+    }
     header.append(brand, title, message);
 
     const parts = [header];
@@ -141,7 +150,7 @@ function start() {
       if (task.due) {
         const due = document.createElement('span');
         due.className = 'raiz-pendencias-due';
-        due.textContent = `Vencimento: ${task.due}`;
+        due.textContent = `Prazo: ${task.due}`;
         item.append(due);
       }
       list.append(item);
