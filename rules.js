@@ -8,6 +8,7 @@ export const TASK_TERMS = [
   'validacao de comprovante'
 ];
 export const BLOCKING_ACTIVITY_ALIAS = '[PROCESSO]avaliarAtendimento';
+export const MIN_ACTIVITY_REQUESTS = 3;
 
 // O filtro codtask usa o ID numérico interno, diferente do código original da atividade.
 // Valores conferidos no filtro de tarefas dos ambientes HML e PRD.
@@ -26,10 +27,7 @@ export function normalizeText(value) {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
-export function matchesBlockingTask(task, internalTaskId = '') {
-  const name = normalizeText(task?.t);
-  if (TASK_TERMS.some(term => name.includes(term))) return true;
-
+function isTargetActivity(task, internalTaskId = '') {
   const activityCodes = [
     task?.instance?.instanceTask?.task?.element?.alias,
     task?.alias,
@@ -41,6 +39,11 @@ export function matchesBlockingTask(task, internalTaskId = '') {
     String(code ?? '') === BLOCKING_ACTIVITY_ALIAS ||
     Boolean(internalTaskId && String(code ?? '') === internalTaskId)
   );
+}
+
+export function matchesBlockingTask(task, internalTaskId = '') {
+  const name = normalizeText(task?.t);
+  return TASK_TERMS.some(term => name.includes(term)) || isTargetActivity(task, internalTaskId);
 }
 
 export function isRelevantPage(pathname) {
@@ -96,8 +99,8 @@ export async function loadBlockingTasks({
   maxPages = 30,
   timeoutMs = 10000
 }) {
-  const found = [];
-  const seen = new Set();
+  const overdue = new Map();
+  const activity = new Map();
   const activityFilter = BLOCKING_ACTIVITY_FILTERS[new URL(origin).hostname];
   const internalTaskId = activityFilter?.taskId || '';
 
@@ -142,21 +145,20 @@ export async function loadBlockingTasks({
     return items;
   }
 
-  function addTask(task, page, filteredByActivity = false) {
-    if (!filteredByActivity && !matchesBlockingTask(task, internalTaskId)) return;
-    const id = String(task.cfetp || task.cfe || `${page}:${found.length}`);
-    if (seen.has(id)) return;
-    seen.add(id);
-    found.push({
+  function taskKey(task, page) {
+    return String(task.cfetp || task.cfe || `${page}:${task.t ?? ''}`);
+  }
+
+  function displayTask(task, id) {
+    return {
       id,
       number: String(task.cfe ?? ''),
       name: String(task.t ?? ''),
       due: String(task.el ?? ''),
       link: String(task.lk ?? '')
-    });
+    };
   }
 
-  let hasLateTasks = false;
   let finished = false;
   for (let page = 1; page <= maxPages; page += 1) {
     const items = await readPage(page);
@@ -164,21 +166,47 @@ export async function loadBlockingTasks({
       finished = true;
       break;
     }
-    hasLateTasks = true;
-    for (const task of items) addTask(task, page);
+    for (const task of items) overdue.set(taskKey(task, page), task);
   }
   if (!finished) {
     throw new Error(`A consulta ultrapassou ${maxPages} páginas; o resultado não é confiável.`);
   }
-  if (found.length || !hasLateTasks || !internalTaskId) return found;
-
-  // O relatório compacto nem sempre inclui o alias. Um filtro específico
-  // identifica a atividade sem depender do nome exibido na tarefa.
-  for (let page = 1; page <= maxPages; page += 1) {
-    const items = await readPage(page, internalTaskId, activityFilter.flow);
-    if (items.length === 0) return found;
-    for (const task of items) addTask(task, page, true);
+  if (overdue.size && internalTaskId) {
+    // O relatório compacto pode omitir o alias. O filtro específico identifica
+    // essas atividades antes de aplicar o limite de solicitações distintas.
+    finished = false;
+    for (let page = 1; page <= maxPages; page += 1) {
+      const items = await readPage(page, internalTaskId, activityFilter.flow);
+      if (items.length === 0) {
+        finished = true;
+        break;
+      }
+      for (const task of items) activity.set(taskKey(task, page), task);
+    }
+    if (!finished) {
+      throw new Error(`A consulta ultrapassou ${maxPages} páginas; o resultado não é confiável.`);
+    }
   }
 
-  throw new Error(`A consulta ultrapassou ${maxPages} páginas; o resultado não é confiável.`);
+  for (const [key, task] of overdue) {
+    if (isTargetActivity(task, internalTaskId)) activity.set(key, task);
+  }
+
+  const activityRequests = new Set();
+  for (const task of activity.values()) {
+    if (!task.cfe) throw new Error('A atividade não contém o número da solicitação.');
+    activityRequests.add(String(task.cfe));
+  }
+
+  const blocking = new Map();
+  for (const [key, task] of overdue) {
+    const name = normalizeText(task.t);
+    if (TASK_TERMS.some(term => name.includes(term))) {
+      blocking.set(key, displayTask(task, key));
+    }
+  }
+  if (activityRequests.size >= MIN_ACTIVITY_REQUESTS) {
+    for (const [key, task] of activity) blocking.set(key, displayTask(task, key));
+  }
+  return [...blocking.values()];
 }
