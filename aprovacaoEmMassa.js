@@ -94,7 +94,7 @@ function showTaskModal(title, message, callback) {
   const contentLeft = getTaskContentLeft();
   jq("body").append(`
     <div id="modalOverlay" style="position: fixed; top: 0; right: 0; bottom: 0; left: ${contentLeft}px; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; background: rgba(12, 47, 45, 0.60); z-index: 90 !important;">
-    <div id="colorbox" role="dialog" aria-modal="true" aria-labelledby="task-modal-title" tabindex="-1" style="display: flex; flex-direction: column; visibility: visible; position: relative !important; top: auto !important; left: auto !important; transform: none !important; margin: 0 !important; width: min(760px, 100%); max-height: calc(100vh - 32px); background: #fff; color: #203330; border: 1px solid #cfe4e1; border-radius: 14px; box-shadow: 0 22px 60px rgba(12, 47, 45, 0.28); overflow: hidden; box-sizing: border-box;">
+    <div id="colorbox" role="dialog" aria-modal="true" aria-labelledby="task-modal-title" tabindex="-1" style="display: flex; flex-direction: column; visibility: visible; position: relative !important; top: auto !important; left: auto !important; transform: none !important; margin: 0 !important; width: min(760px, 100%); max-height: min(76vh, 680px); background: #fff; color: #203330; border: 1px solid #cfe4e1; border-radius: 14px; box-shadow: 0 22px 60px rgba(12, 47, 45, 0.28); overflow: hidden; box-sizing: border-box;">
       <div style="flex: none; padding: 20px 24px 16px; border-bottom: 3px solid #f08700; background: linear-gradient(105deg, #eaf7f5 0%, #fff6e9 100%);">
         <div style="color: #286f69; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;">Ticket Raiz · Tarefas</div>
         <h2 id="task-modal-title" style="margin: 5px 0 0; color: #174e4a; font-size: 20px; font-weight: 700; line-height: 1.3;">${escapeTaskMessage(title)}</h2>
@@ -476,7 +476,7 @@ function formatTaskErrorForDisplay(error) {
   const invalidApproval = /resultado de ação\s*["“”']?1["“”']?\s*não condiz com nenhum botão previsto na configuração/i.test(message);
   const completionExpected = /resultados esperados são:\s*["“”']?3(?!\d)["“”']?/i.test(message);
   if (invalidApproval && completionExpected) {
-    return "A ação informada não é válida para a etapa atual do processo.\n\n"
+    return "A ação informada não é válida para a etapa atual do processo."
       + "Neste momento, a tarefa está em uma etapa de conclusão, e não de aprovação.";
   }
   return message;
@@ -497,6 +497,24 @@ function buildTaskBatchSummary(results, decisao) {
     + `<strong style="display: block; margin-bottom: 4px; color: ${color};">${escapeTaskMessage(item.taskId)}</strong>`
     + `<div style="white-space: pre-wrap; overflow-wrap: anywhere;">${escapeTaskMessage(displayError(item))}</div></div>`
   )).join("");
+  const failedGroups = Array.from(failed.reduce((groups, item) => {
+    const error = formatTaskErrorForDisplay(item.error);
+    if (!groups.has(error)) groups.set(error, { error, tasks: [] });
+    groups.get(error).tasks.push(item);
+    return groups;
+  }, new Map()).values()).sort((a, b) => b.tasks.length - a.tasks.length);
+  const renderTaskIds = (items) => `<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;">${items.map((item) => (
+    `<span style="padding: 3px 8px; border-radius: 999px; background: #fee2e2; color: #991b1b; font-size: 12px; font-weight: 700;">${escapeTaskMessage(item.taskId)}</span>`
+  )).join("")}</div>`;
+  const renderFailedGroup = (group) => {
+    const extraTasks = group.tasks.slice(5);
+    return `<div style="padding: 12px 14px; border: 1px solid #fee2e2; border-left: 3px solid #b91c1c; border-radius: 8px; background: #fffafa;">`
+      + `<strong style="display: block; margin-bottom: 5px; color: #991b1b;">${group.tasks.length === 1 ? escapeTaskMessage(group.tasks[0].taskId) : `${group.tasks.length} tarefas com o mesmo motivo`}</strong>`
+      + `<div style="white-space: pre-wrap; overflow-wrap: anywhere;">${escapeTaskMessage(group.error)}</div>`
+      + (group.tasks.length > 1 ? renderTaskIds(group.tasks.slice(0, 5)) : "")
+      + (extraTasks.length > 0 ? `<details style="margin-top: 8px;"><summary style="cursor: pointer; color: #991b1b; font-weight: 700;">Ver outros ${extraTasks.length} tickets</summary>${renderTaskIds(extraTasks)}</details>` : "")
+      + `</div>`;
+  };
   let message = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; margin-bottom: 22px;" aria-label="Resumo de ${results.length} ${results.length === 1 ? "tarefa" : "tarefas"}">`
     + statusCard(successful.length, `Tarefas ${actionLabel}`, "#17635e", "#eaf7f5", "#a8dad4")
     + statusCard(failed.length, "Com erro", "#b91c1c", "#fef2f2", "#fecaca")
@@ -511,9 +529,13 @@ function buildTaskBatchSummary(results, decisao) {
       + `</div></details>`;
   }
   if (failed.length > 0) {
+    const extraGroups = failedGroups.slice(3);
+    const extraTaskCount = extraGroups.reduce((total, group) => total + group.tasks.length, 0);
     message += `<section aria-label="Erros por tarefa" style="margin-bottom: 22px;">`
-      + `<h3 style="margin: 0 0 10px; color: #991b1b; font-size: 15px; font-weight: 700;">Erros por tarefa</h3>`
-      + `<div style="display: grid; gap: 9px;">${renderItems(failed, "#b91c1c", "#fffafa", "#fee2e2", (item) => formatTaskErrorForDisplay(item.error))}</div></section>`;
+      + `<h3 style="margin: 0 0 10px; color: #991b1b; font-size: 15px; font-weight: 700;">Erros por tarefa <span style="font-size: 12px; font-weight: 600;">(${failed.length})</span></h3>`
+      + `<div style="display: grid; gap: 9px;">${failedGroups.slice(0, 3).map(renderFailedGroup).join("")}</div>`
+      + (extraGroups.length > 0 ? `<details style="margin-top: 10px; padding: 11px 14px; border: 1px solid #fee2e2; border-radius: 8px;"><summary style="cursor: pointer; color: #991b1b; font-weight: 700;">Ver outros ${extraGroups.length} motivos (${extraTaskCount} tarefas)</summary><div style="display: grid; gap: 9px; margin-top: 10px;">${extraGroups.map(renderFailedGroup).join("")}</div></details>` : "")
+      + `</section>`;
   }
   if (uncertain.length > 0) {
     message += `<section aria-label="Resultado n\u00e3o confirmado" style="margin-bottom: 22px;">`
