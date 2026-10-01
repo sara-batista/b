@@ -78,6 +78,17 @@ function escapeTaskMessage(value) {
     .replace(/'/g, "&#039;");
 }
 
+function resolveTaskRequestUrl(value) {
+  if (!value || typeof window === "undefined" || !window.location?.origin) return "";
+  try {
+    const url = new URL(value, window.location.origin);
+    const isTaskPage = url.pathname === "/2.0/task" || url.pathname.startsWith("/2.0/task/");
+    return url.protocol === "https:" && url.origin === window.location.origin && isTaskPage ? url.href : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 function createTaskSupportMessage() {
   const supportUrl = "https://raizeducacao.zeev.it/2.0/request?c=nIGZbj%2BSflQVvsUdA5hVOmC4ZZr8GXW%2FThxNe7g52WrGa4yThcuEkqRqO5VT82klt906ee7Z6xOdQXtaVd20Pg%3D%3D";
   return `Para solicitar suporte, acesse <a href="${supportUrl}" target="_blank" rel="noopener noreferrer" style="color: #855000; text-decoration: underline;"><strong>[Processos] Solicitações Ticket Raiz</strong></a>.`;
@@ -492,9 +503,16 @@ function buildTaskBatchSummary(results, decisao) {
     + `<strong style="display: block; font-size: 26px; line-height: 1.1;">${count}</strong>`
     + `<span style="display: block; margin-top: 5px; font-size: 13px; font-weight: 600;">${label}</span></div>`
   );
+  const renderTaskNumber = (item, style) => {
+    const number = escapeTaskMessage(item.taskId);
+    const url = resolveTaskRequestUrl(item.taskUrl);
+    return url
+      ? `<a href="${escapeTaskMessage(url)}" target="_blank" rel="noopener noreferrer" aria-label="Abrir solicitação ${number} em nova aba" style="${style} text-decoration: underline; text-underline-offset: 2px;">${number}</a>`
+      : `<span style="${style}">${number}</span>`;
+  };
   const renderItems = (items, color, background, border, displayError = (item) => item.error) => items.map((item) => (
     `<div style="padding: 12px 14px; border: 1px solid ${border}; border-left: 3px solid ${color}; border-radius: 8px; background: ${background};">`
-    + `<strong style="display: block; margin-bottom: 4px; color: ${color};">${escapeTaskMessage(item.taskId)}</strong>`
+    + `<strong style="display: block; margin-bottom: 4px;">${renderTaskNumber(item, `color: ${color};`)}</strong>`
     + `<div style="white-space: pre-wrap; overflow-wrap: anywhere;">${escapeTaskMessage(displayError(item))}</div></div>`
   )).join("");
   const failedGroups = Array.from(failed.reduce((groups, item) => {
@@ -504,15 +522,13 @@ function buildTaskBatchSummary(results, decisao) {
     return groups;
   }, new Map()).values()).sort((a, b) => b.tasks.length - a.tasks.length);
   const renderTaskIds = (items) => `<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;">${items.map((item) => (
-    `<span style="padding: 3px 8px; border-radius: 999px; background: #fee2e2; color: #991b1b; font-size: 12px; font-weight: 700;">${escapeTaskMessage(item.taskId)}</span>`
+    renderTaskNumber(item, "display: inline-block; padding: 3px 8px; border-radius: 999px; background: #fee2e2; color: #991b1b; font-size: 12px; font-weight: 700;")
   )).join("")}</div>`;
   const renderFailedGroup = (group) => {
-    const extraTasks = group.tasks.slice(5);
     return `<div style="padding: 12px 14px; border: 1px solid #fee2e2; border-left: 3px solid #b91c1c; border-radius: 8px; background: #fffafa;">`
-      + `<strong style="display: block; margin-bottom: 5px; color: #991b1b;">${group.tasks.length === 1 ? escapeTaskMessage(group.tasks[0].taskId) : `${group.tasks.length} tarefas com o mesmo motivo`}</strong>`
+      + `<strong style="display: block; margin-bottom: 5px; color: #991b1b;">${group.tasks.length === 1 ? renderTaskNumber(group.tasks[0], "color: #991b1b;") : `${group.tasks.length} tarefas com o mesmo motivo`}</strong>`
       + `<div style="white-space: pre-wrap; overflow-wrap: anywhere;">${escapeTaskMessage(group.error)}</div>`
-      + (group.tasks.length > 1 ? renderTaskIds(group.tasks.slice(0, 5)) : "")
-      + (extraTasks.length > 0 ? `<details style="margin-top: 8px;"><summary style="cursor: pointer; color: #991b1b; font-weight: 700;">Ver outros ${extraTasks.length} tickets</summary>${renderTaskIds(extraTasks)}</details>` : "")
+      + (group.tasks.length > 1 ? `<details style="margin-top: 10px;"><summary style="cursor: pointer; color: #991b1b; font-weight: 700;">Ver ${group.tasks.length} tickets</summary>${renderTaskIds(group.tasks)}</details>` : "")
       + `</div>`;
   };
   let message = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; margin-bottom: 22px;" aria-label="Resumo de ${results.length} ${results.length === 1 ? "tarefa" : "tarefas"}">`
@@ -525,7 +541,7 @@ function buildTaskBatchSummary(results, decisao) {
     message += `<details style="margin-bottom: 22px; padding: 12px 14px; border: 1px solid #b8dfda; border-radius: 8px; background: #f3faf9;">`
       + `<summary style="cursor: pointer; color: #17635e; font-weight: 700;">Ver ${successful.length} ${successful.length === 1 ? "tarefa" : "tarefas"} ${actionLabel}</summary>`
       + `<div style="display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px;">`
-      + successful.map((task) => `<span style="padding: 4px 9px; border-radius: 999px; background: #d8f1ee; color: #17635e; font-weight: 600;">${escapeTaskMessage(task.taskId)}</span>`).join("")
+      + successful.map((task) => renderTaskNumber(task, "display: inline-block; padding: 4px 9px; border-radius: 999px; background: #d8f1ee; color: #17635e; font-weight: 600;")).join("")
       + `</div></details>`;
   }
   if (failed.length > 0) {
@@ -560,10 +576,11 @@ async function movimentaTarefas(decisao) {
       const row = checkbox.closest("tr");
       const taskNumber = String(checkbox.val() || row.data("key") || "").trim();
       const taskId = row.find("td.d-none.d-md-table-cell span.badge").text().trim();
+      const taskUrl = resolveTaskRequestUrl(row.attr("data-href"));
 
-      return taskNumber ? { taskNumber, taskId: taskId || `#${taskNumber}` } : null;
+      return taskNumber ? { taskNumber, taskId: taskId || `#${taskNumber}`, taskUrl } : null;
     }).get().filter(Boolean);
-    console.log("Tarefas selecionadas para processamento:", tasks);
+    console.log("Tarefas selecionadas para processamento:", tasks.map(({ taskNumber, taskId }) => ({ taskNumber, taskId })));
 
     const totalTasks = tasks.length;
 
