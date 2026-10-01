@@ -514,9 +514,13 @@ async function movimentaTarefas(decisao) {
       </div>
     `);
 
-    const token = await buscaToken();
+    const authentication = await buscaToken();
+    if (!authentication.token) {
+      showTaskModal("Falha na autenticação", `<p>${escapeTaskMessage(authentication.error)}</p>`);
+      return;
+    }
 
-    const results = await processTaskBatch(tasks, decisao, token, {
+    const results = await processTaskBatch(tasks, decisao, authentication.token, {
       onProgress(processed, total) {
         jq("#progressCount").text(`${processed} / ${total}`);
       }
@@ -581,31 +585,57 @@ async function processaMovimentacao(id, result, reason, token) {
   }
 }
 
-async function buscaToken() {
-  try {
-    var usuarioLogado = getCurrentZeevUserId();
-    if (!usuarioLogado) throw new Error("ID do usuário inválido.");
+function describeAuthenticationFailure(stage, error) {
+  const status = Number(error?.status);
+  return status > 0 ? `${stage}: HTTP ${status}.` : `${stage}: sem resposta válida.`;
+}
 
-    var apiUrl = `${window.location.origin}/api/internal/legacy/1.0/datasource/get/1.0/` +
+async function buscaToken() {
+  const usuarioLogado = getCurrentZeevUserId();
+  if (!usuarioLogado) {
+    return { token: null, error: "Não foi possível identificar o usuário logado no Zeev. Nenhuma tarefa foi enviada." };
+  }
+
+  const errors = [];
+  try {
+    const currentUser = await jq.ajax({
+      url: `${window.location.origin}/api/2/tokens`,
+      method: "GET",
+      headers: { "Content-Type": "application/json" }
+    });
+    if (currentUser?.temporaryToken && resolveZeevUserId([currentUser.userId]) === usuarioLogado) {
+      return { token: currentUser.temporaryToken, error: null };
+    }
+    errors.push("Token do usuário atual: resposta sem token válido para o usuário logado.");
+  } catch (error) {
+    errors.push(describeAuthenticationFailure("Token do usuário atual", error));
+  }
+
+  let stage = "Datasource do Zeev";
+  try {
+    const apiUrl = `${window.location.origin}/api/internal/legacy/1.0/datasource/get/1.0/` +
       (window.location.origin.includes('hml')
         ? "yjbbrV4FLfJUDeTgo97d3CmCz9CCIBqtlH2OupdGmAiSrUr8-LKFdChlE37fCDRMhGf@-i0xUw8t9Pl8mXHU6w__"
         : "DDwgBioycx75M0IiEFF-sdk0HwdR17CgcklxG-9Wy5WHeAyX4eV9pCstsjxLBqOYG2SnaXgEA6YhPK1R8LpVdw__"
       );
 
-    var responseToken = await jq.ajax({ url: apiUrl, method: "GET", headers: { "Content-Type": "application/json" } });
+    const responseToken = await jq.ajax({ url: apiUrl, method: "GET", headers: { "Content-Type": "application/json" } });
     const token = responseToken?.success?.[0]?.cod || (() => { throw new Error("Token não encontrado."); })();
 
-    var response = await jq.ajax({
+    stage = "Impersonação do usuário";
+    const response = await jq.ajax({
       url: `${window.location.origin}/api/2/tokens/impersonate/${usuarioLogado}`,
       method: "GET",
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" }
     });
 
-    return response?.impersonate?.temporaryToken || (() => { throw new Error("Token de impersonação não encontrado."); })();
+    const temporaryToken = response?.impersonate?.temporaryToken;
+    if (!temporaryToken) throw new Error("Token de impersonação não encontrado.");
+    return { token: temporaryToken, error: null };
 
   } catch (error) {
-    console.error("Erro ao processar tarefa:", error);
-    return null;
+    errors.push(describeAuthenticationFailure(stage, error));
+    return { token: null, error: `${errors.join(" ")} Nenhuma tarefa foi enviada.` };
   }
 
 }
@@ -706,6 +736,7 @@ if (typeof module !== "undefined" && module.exports) {
     createAssignmentPayload,
     processTaskBatch,
     buildTaskBatchSummary,
+    buscaToken,
     movimentaTarefas,
     processaMovimentacao
   };
