@@ -80,26 +80,41 @@ function escapeTaskMessage(value) {
 
 function createTaskSupportMessage() {
   const supportUrl = "https://raizeducacao.zeev.it/2.0/request?c=nIGZbj%2BSflQVvsUdA5hVOmC4ZZr8GXW%2FThxNe7g52WrGa4yThcuEkqRqO5VT82klt906ee7Z6xOdQXtaVd20Pg%3D%3D";
-  return `Para solicitar suporte, acesse <a href="${supportUrl}" target="_blank" rel="noopener noreferrer"><strong>[Processos] Solicitações Ticket Raiz</strong></a>.`;
+  return `Para solicitar suporte, acesse <a href="${supportUrl}" target="_blank" rel="noopener noreferrer" style="color: #855000; text-decoration: underline;"><strong>[Processos] Solicitações Ticket Raiz</strong></a>.`;
+}
+
+function getTaskContentLeft() {
+  if (typeof document === "undefined") return 0;
+  return Math.max(0, document.querySelector("#containerPageContent")?.getBoundingClientRect().left || 0);
 }
 
 function showTaskModal(title, message, callback) {
   jq("#modalOverlay, #colorbox").remove();
+  if (typeof window !== "undefined") jq(window).off("resize.ticketRaizResultModal");
+  const contentLeft = getTaskContentLeft();
   jq("body").append(`
-    <div id="modalOverlay" style="position: fixed; inset: 0; background: rgba(15, 23, 42, 0.58); z-index: 89 !important;"></div>
-    <div id="colorbox" role="dialog" aria-modal="true" aria-labelledby="task-modal-title" tabindex="-1" style="display: flex; flex-direction: column; visibility: visible; top: 50%; left: 50%; transform: translate(-50%, -50%); position: fixed; width: min(760px, calc(100vw - 32px)); max-height: 85vh; background: #fff; color: #1f2937; z-index: 90 !important; border-radius: 12px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28); overflow: hidden; box-sizing: border-box;">
-      <div style="flex: none; padding: 20px 24px 16px; border-bottom: 1px solid #e5e7eb;">
-        <div style="color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">Tarefas</div>
-        <h2 id="task-modal-title" style="margin: 5px 0 0; color: #172554; font-size: 20px; font-weight: 700; line-height: 1.3;">${escapeTaskMessage(title)}</h2>
+    <div id="modalOverlay" style="position: fixed; top: 0; right: 0; bottom: 0; left: ${contentLeft}px; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; background: rgba(12, 47, 45, 0.60); z-index: 90 !important;">
+    <div id="colorbox" role="dialog" aria-modal="true" aria-labelledby="task-modal-title" tabindex="-1" style="display: flex; flex-direction: column; visibility: visible; position: relative !important; top: auto !important; left: auto !important; transform: none !important; margin: 0 !important; width: min(760px, 100%); max-height: calc(100vh - 32px); background: #fff; color: #203330; border: 1px solid #cfe4e1; border-radius: 14px; box-shadow: 0 22px 60px rgba(12, 47, 45, 0.28); overflow: hidden; box-sizing: border-box;">
+      <div style="flex: none; padding: 20px 24px 16px; border-bottom: 3px solid #f08700; background: linear-gradient(105deg, #eaf7f5 0%, #fff6e9 100%);">
+        <div style="color: #286f69; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;">Ticket Raiz · Tarefas</div>
+        <h2 id="task-modal-title" style="margin: 5px 0 0; color: #174e4a; font-size: 20px; font-weight: 700; line-height: 1.3;">${escapeTaskMessage(title)}</h2>
       </div>
-      <div style="min-height: 0; overflow-y: auto; overflow-wrap: anywhere; padding: 20px 24px; font-size: 14px; line-height: 1.5;">${message}</div>
-      <div style="flex: none; padding: 14px 24px; border-top: 1px solid #e5e7eb; text-align: right; background: #fff;">
-        <button type="button" class="btn btn-success close-task-modal-btn" style="min-width: 96px;">OK</button>
+      <div style="min-height: 0; overflow-y: auto; overflow-wrap: anywhere; padding: 20px 24px; font-size: 14px; line-height: 1.5; background: #fff;">${message}</div>
+      <div style="flex: none; padding: 14px 24px; border-top: 1px solid #dbeae7; text-align: right; background: #f7fbfa;">
+        <button type="button" class="btn close-task-modal-btn" style="min-width: 96px; padding: 8px 18px; border: 1px solid #d47900; border-radius: 8px; background: #f08700; color: #203330; font-weight: 700;">OK</button>
       </div>
+    </div>
     </div>
   `);
 
+  if (typeof window !== "undefined") {
+    jq(window).on("resize.ticketRaizResultModal", function () {
+      jq("#modalOverlay").css("left", `${getTaskContentLeft()}px`);
+    });
+  }
+
   jq(".close-task-modal-btn").off("click").on("click", function () {
+    if (typeof window !== "undefined") jq(window).off("resize.ticketRaizResultModal");
     jq("#modalOverlay, #colorbox").remove();
     if (typeof callback === "function") callback();
   });
@@ -456,6 +471,17 @@ async function processTaskBatch(tasks, decisao, token, options = {}) {
   return results;
 }
 
+function formatTaskErrorForDisplay(error) {
+  const message = String(error ?? "");
+  const invalidApproval = /resultado de ação\s*["“”']?1["“”']?\s*não condiz com nenhum botão previsto na configuração/i.test(message);
+  const completionExpected = /resultados esperados são:\s*["“”']?3(?!\d)["“”']?/i.test(message);
+  if (invalidApproval && completionExpected) {
+    return "A ação informada não é válida para a etapa atual do processo.\n\n"
+      + "Neste momento, a tarefa está em uma etapa de conclusão, e não de aprovação.";
+  }
+  return message;
+}
+
 function buildTaskBatchSummary(results, decisao) {
   const successful = results.filter((result) => result.status === "success");
   const failed = results.filter((result) => result.status === "failed");
@@ -466,37 +492,37 @@ function buildTaskBatchSummary(results, decisao) {
     + `<strong style="display: block; font-size: 26px; line-height: 1.1;">${count}</strong>`
     + `<span style="display: block; margin-top: 5px; font-size: 13px; font-weight: 600;">${label}</span></div>`
   );
-  const renderItems = (items, color, background, border) => items.map((item) => (
+  const renderItems = (items, color, background, border, displayError = (item) => item.error) => items.map((item) => (
     `<div style="padding: 12px 14px; border: 1px solid ${border}; border-left: 3px solid ${color}; border-radius: 8px; background: ${background};">`
     + `<strong style="display: block; margin-bottom: 4px; color: ${color};">${escapeTaskMessage(item.taskId)}</strong>`
-    + `<div style="white-space: pre-wrap; overflow-wrap: anywhere;">${escapeTaskMessage(item.error)}</div></div>`
+    + `<div style="white-space: pre-wrap; overflow-wrap: anywhere;">${escapeTaskMessage(displayError(item))}</div></div>`
   )).join("");
   let message = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; margin-bottom: 22px;" aria-label="Resumo de ${results.length} ${results.length === 1 ? "tarefa" : "tarefas"}">`
-    + statusCard(successful.length, `Tarefas ${actionLabel}`, "#166534", "#f0fdf4", "#bbf7d0")
+    + statusCard(successful.length, `Tarefas ${actionLabel}`, "#17635e", "#eaf7f5", "#a8dad4")
     + statusCard(failed.length, "Com erro", "#b91c1c", "#fef2f2", "#fecaca")
-    + statusCard(uncertain.length, "N\u00e3o confirmadas", "#92400e", "#fffbeb", "#fde68a")
+    + statusCard(uncertain.length, "N\u00e3o confirmadas", "#8a4e00", "#fff4e6", "#f3c48b")
     + `</div>`;
 
   if (successful.length > 0) {
-    message += `<details style="margin-bottom: 22px; padding: 12px 14px; border: 1px solid #d1fae5; border-radius: 8px; background: #f7fef9;">`
-      + `<summary style="cursor: pointer; color: #166534; font-weight: 700;">Ver ${successful.length} ${successful.length === 1 ? "tarefa" : "tarefas"} ${actionLabel}</summary>`
+    message += `<details style="margin-bottom: 22px; padding: 12px 14px; border: 1px solid #b8dfda; border-radius: 8px; background: #f3faf9;">`
+      + `<summary style="cursor: pointer; color: #17635e; font-weight: 700;">Ver ${successful.length} ${successful.length === 1 ? "tarefa" : "tarefas"} ${actionLabel}</summary>`
       + `<div style="display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px;">`
-      + successful.map((task) => `<span style="padding: 4px 9px; border-radius: 999px; background: #dcfce7; color: #166534; font-weight: 600;">${escapeTaskMessage(task.taskId)}</span>`).join("")
+      + successful.map((task) => `<span style="padding: 4px 9px; border-radius: 999px; background: #d8f1ee; color: #17635e; font-weight: 600;">${escapeTaskMessage(task.taskId)}</span>`).join("")
       + `</div></details>`;
   }
   if (failed.length > 0) {
     message += `<section aria-label="Erros por tarefa" style="margin-bottom: 22px;">`
       + `<h3 style="margin: 0 0 10px; color: #991b1b; font-size: 15px; font-weight: 700;">Erros por tarefa</h3>`
-      + `<div style="display: grid; gap: 9px;">${renderItems(failed, "#b91c1c", "#fffafa", "#fee2e2")}</div></section>`;
+      + `<div style="display: grid; gap: 9px;">${renderItems(failed, "#b91c1c", "#fffafa", "#fee2e2", (item) => formatTaskErrorForDisplay(item.error))}</div></section>`;
   }
   if (uncertain.length > 0) {
     message += `<section aria-label="Resultado n\u00e3o confirmado" style="margin-bottom: 22px;">`
-      + `<h3 style="margin: 0 0 6px; color: #92400e; font-size: 15px; font-weight: 700;">Resultado n\u00e3o confirmado</h3>`
-      + `<p style="margin: 0 0 10px; color: #78350f;">Confira o estado destas tarefas antes de tentar novamente.</p>`
-      + `<div style="display: grid; gap: 9px;">${renderItems(uncertain, "#92400e", "#fffcf3", "#fde68a")}</div></section>`;
+      + `<h3 style="margin: 0 0 6px; color: #8a4e00; font-size: 15px; font-weight: 700;">Resultado n\u00e3o confirmado</h3>`
+      + `<p style="margin: 0 0 10px; color: #714400;">Confira o estado destas tarefas antes de tentar novamente.</p>`
+      + `<div style="display: grid; gap: 9px;">${renderItems(uncertain, "#8a4e00", "#fff9f0", "#f3c48b")}</div></section>`;
   }
   if (failed.length > 0 || uncertain.length > 0) {
-    message += `<div style="padding-top: 14px; border-top: 1px solid #e5e7eb; color: #475569; font-size: 13px;">${createTaskSupportMessage()}</div>`;
+    message += `<div style="padding-top: 14px; border-top: 1px solid #dbeae7; color: #45615e; font-size: 13px;">${createTaskSupportMessage()}</div>`;
   }
 
   const title = failed.length > 0 || uncertain.length > 0
@@ -530,13 +556,25 @@ async function movimentaTarefas(decisao) {
     jq("#btnApproveTasks, #btnRejectTasks").prop("disabled", true);
     jq(".app-overlay").show();
 
+    const contentLeft = getTaskContentLeft();
     jq("body").append(`
-      <div id="processingModal" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1); border-radius: 8px; z-index: 100; text-align: center;">
-        <p>Processando movimentações...</p>
-        <p id="currentTaskNumber">Autenticando...</p>
-        <p id="progressCount">0 / ${totalTasks} concluídas</p>
+      <div id="processingModal" style="position: fixed; top: 0; right: 0; bottom: 0; left: ${contentLeft}px; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; background: rgba(12, 47, 45, 0.20); z-index: 100;">
+        <div role="status" aria-live="polite" style="width: min(380px, 100%); padding: 24px; box-sizing: border-box; background: #fff; border: 1px solid #cfe4e1; border-top: 4px solid #f08700; border-radius: 14px; box-shadow: 0 20px 50px rgba(12, 47, 45, 0.25); text-align: left;">
+          <div style="color: #286f69; font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;">Ticket Raiz · Tarefas</div>
+          <p style="margin: 5px 0 20px; color: #174e4a; font-size: 18px; font-weight: 700; line-height: 1.3;">Processando movimentações...</p>
+          <p id="currentTaskNumber" style="margin: 0 0 14px; color: #174e4a; font-weight: 600; overflow-wrap: anywhere;">Autenticando...</p>
+          <div role="progressbar" aria-label="Progresso do lote" aria-valuemin="0" aria-valuemax="${totalTasks}" aria-valuenow="0" style="height: 8px; overflow: hidden; border-radius: 999px; background: #eaf7f5;">
+            <div id="taskProgressBar" style="width: 0%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7ac5bf, #f08700); transition: width 0.25s ease;"></div>
+          </div>
+          <p id="progressCount" style="margin: 9px 0 0; color: #45615e; font-size: 13px; text-align: right;">0 / ${totalTasks} concluídas</p>
+        </div>
       </div>
     `);
+    if (typeof window !== "undefined") {
+      jq(window).off("resize.ticketRaizProcessingModal").on("resize.ticketRaizProcessingModal", function () {
+        jq("#processingModal").css("left", `${getTaskContentLeft()}px`);
+      });
+    }
 
     const authentication = await buscaToken();
     if (!authentication.token) {
@@ -550,6 +588,8 @@ async function movimentaTarefas(decisao) {
       },
       onProgress(processed, total) {
         jq("#progressCount").text(`${processed} / ${total} concluídas`);
+        jq("#taskProgressBar").css("width", `${Math.round((processed / total) * 100)}%`);
+        jq("#processingModal [role='progressbar']").attr("aria-valuenow", processed);
       }
     });
 
@@ -566,6 +606,7 @@ async function movimentaTarefas(decisao) {
       `Não foi possível concluir o processamento das tarefas.<br><br>${createTaskSupportMessage()}`
     );
   } finally {
+    if (typeof window !== "undefined") jq(window).off("resize.ticketRaizProcessingModal");
     jq(".app-overlay").hide();
     jq("#processingModal").remove();
     jq("#btnApproveTasks, #btnRejectTasks").prop("disabled", false);
