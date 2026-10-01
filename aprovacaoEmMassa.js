@@ -86,12 +86,15 @@ function createTaskSupportMessage() {
 function showTaskModal(title, message, callback) {
   jq("#modalOverlay, #colorbox").remove();
   jq("body").append(`
-    <div id="modalOverlay" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 89 !important;"></div>
-    <div id="colorbox" role="dialog" aria-modal="true" tabindex="-1" style="display: flex; flex-direction: column; visibility: visible; top: 50%; left: 50%; transform: translate(-50%, -50%); position: fixed; width: min(640px, calc(100vw - 32px)); max-height: 80vh; background: white; z-index: 90 !important; border-radius: 8px; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3); padding: 16px;">
-      <h2 style="margin: 0 0 12px; text-align: center; font-size: 18px;">${escapeTaskMessage(title)}</h2>
-      <div style="min-height: 0; overflow-y: auto; overflow-wrap: anywhere;">${message}</div>
-      <div style="margin-top: 16px; text-align: center;">
-        <button type="button" class="btn btn-success close-task-modal-btn">OK</button>
+    <div id="modalOverlay" style="position: fixed; inset: 0; background: rgba(15, 23, 42, 0.58); z-index: 89 !important;"></div>
+    <div id="colorbox" role="dialog" aria-modal="true" aria-labelledby="task-modal-title" tabindex="-1" style="display: flex; flex-direction: column; visibility: visible; top: 50%; left: 50%; transform: translate(-50%, -50%); position: fixed; width: min(760px, calc(100vw - 32px)); max-height: 85vh; background: #fff; color: #1f2937; z-index: 90 !important; border-radius: 12px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28); overflow: hidden; box-sizing: border-box;">
+      <div style="flex: none; padding: 20px 24px 16px; border-bottom: 1px solid #e5e7eb;">
+        <div style="color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;">Tarefas</div>
+        <h2 id="task-modal-title" style="margin: 5px 0 0; color: #172554; font-size: 20px; font-weight: 700; line-height: 1.3;">${escapeTaskMessage(title)}</h2>
+      </div>
+      <div style="min-height: 0; overflow-y: auto; overflow-wrap: anywhere; padding: 20px 24px; font-size: 14px; line-height: 1.5;">${message}</div>
+      <div style="flex: none; padding: 14px 24px; border-top: 1px solid #e5e7eb; text-align: right; background: #fff;">
+        <button type="button" class="btn btn-success close-task-modal-btn" style="min-width: 96px;">OK</button>
       </div>
     </div>
   `);
@@ -411,6 +414,7 @@ async function validaPendencias() {
 async function processTaskBatch(tasks, decisao, token, options = {}) {
   const processTask = options.processTask || processaMovimentacao;
   const wait = options.wait || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const onTaskStart = options.onTaskStart || (() => {});
   const onProgress = options.onProgress || (() => {});
   const results = [];
 
@@ -422,7 +426,8 @@ async function processTaskBatch(tasks, decisao, token, options = {}) {
     }));
   }
 
-  for (const task of tasks) {
+  for (const [index, task] of tasks.entries()) {
+    onTaskStart(task, index + 1, tasks.length);
     try {
       await wait(2000);
       const response = await processTask(
@@ -456,28 +461,46 @@ function buildTaskBatchSummary(results, decisao) {
   const failed = results.filter((result) => result.status === "failed");
   const uncertain = results.filter((result) => result.status === "uncertain");
   const actionLabel = decisao ? "aprovadas" : "reprovadas";
-  const renderItems = (items) => `<ul style="padding-left: 20px;">${items.map((item) => (
-    `<li><strong>${escapeTaskMessage(item.taskId)}</strong>: ${escapeTaskMessage(item.error)}</li>`
-  )).join("")}</ul>`;
-  let message = `<p><strong>${successful.length}</strong> de ${results.length} tarefas ${actionLabel}. `
-    + `<strong>${failed.length}</strong> com erro. `
-    + `<strong>${uncertain.length}</strong> com resultado não confirmado.</p>`;
+  const statusCard = (count, label, color, background, border) => (
+    `<div style="padding: 14px 16px; border: 1px solid ${border}; border-radius: 10px; background: ${background}; color: ${color};">`
+    + `<strong style="display: block; font-size: 26px; line-height: 1.1;">${count}</strong>`
+    + `<span style="display: block; margin-top: 5px; font-size: 13px; font-weight: 600;">${label}</span></div>`
+  );
+  const renderItems = (items, color, background, border) => items.map((item) => (
+    `<div style="padding: 12px 14px; border: 1px solid ${border}; border-left: 3px solid ${color}; border-radius: 8px; background: ${background};">`
+    + `<strong style="display: block; margin-bottom: 4px; color: ${color};">${escapeTaskMessage(item.taskId)}</strong>`
+    + `<div style="white-space: pre-wrap; overflow-wrap: anywhere;">${escapeTaskMessage(item.error)}</div></div>`
+  )).join("");
+  let message = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; margin-bottom: 22px;" aria-label="Resumo de ${results.length} ${results.length === 1 ? "tarefa" : "tarefas"}">`
+    + statusCard(successful.length, `Tarefas ${actionLabel}`, "#166534", "#f0fdf4", "#bbf7d0")
+    + statusCard(failed.length, "Com erro", "#b91c1c", "#fef2f2", "#fecaca")
+    + statusCard(uncertain.length, "N\u00e3o confirmadas", "#92400e", "#fffbeb", "#fde68a")
+    + `</div>`;
 
   if (successful.length > 0) {
-    message += `<p>Concluídas: ${successful.map((task) => escapeTaskMessage(task.taskId)).join(", ")}.</p>`;
+    message += `<details style="margin-bottom: 22px; padding: 12px 14px; border: 1px solid #d1fae5; border-radius: 8px; background: #f7fef9;">`
+      + `<summary style="cursor: pointer; color: #166534; font-weight: 700;">Ver ${successful.length} ${successful.length === 1 ? "tarefa" : "tarefas"} ${actionLabel}</summary>`
+      + `<div style="display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px;">`
+      + successful.map((task) => `<span style="padding: 4px 9px; border-radius: 999px; background: #dcfce7; color: #166534; font-weight: 600;">${escapeTaskMessage(task.taskId)}</span>`).join("")
+      + `</div></details>`;
   }
   if (failed.length > 0) {
-    message += `<p><strong>Erros por tarefa:</strong></p>${renderItems(failed)}`;
+    message += `<section aria-label="Erros por tarefa" style="margin-bottom: 22px;">`
+      + `<h3 style="margin: 0 0 10px; color: #991b1b; font-size: 15px; font-weight: 700;">Erros por tarefa</h3>`
+      + `<div style="display: grid; gap: 9px;">${renderItems(failed, "#b91c1c", "#fffafa", "#fee2e2")}</div></section>`;
   }
   if (uncertain.length > 0) {
-    message += `<p><strong>Resultado não confirmado:</strong> confira o estado destas tarefas antes de tentar novamente.</p>${renderItems(uncertain)}`;
+    message += `<section aria-label="Resultado n\u00e3o confirmado" style="margin-bottom: 22px;">`
+      + `<h3 style="margin: 0 0 6px; color: #92400e; font-size: 15px; font-weight: 700;">Resultado n\u00e3o confirmado</h3>`
+      + `<p style="margin: 0 0 10px; color: #78350f;">Confira o estado destas tarefas antes de tentar novamente.</p>`
+      + `<div style="display: grid; gap: 9px;">${renderItems(uncertain, "#92400e", "#fffcf3", "#fde68a")}</div></section>`;
   }
   if (failed.length > 0 || uncertain.length > 0) {
-    message += `<p>${createTaskSupportMessage()}</p>`;
+    message += `<div style="padding-top: 14px; border-top: 1px solid #e5e7eb; color: #475569; font-size: 13px;">${createTaskSupportMessage()}</div>`;
   }
 
   const title = failed.length > 0 || uncertain.length > 0
-    ? successful.length > 0 ? "Concluído com ressalvas" : "Não concluído"
+    ? successful.length > 0 ? "Conclu\u00eddo com ressalvas" : "N\u00e3o conclu\u00eddo"
     : "Sucesso!";
   return { title, message, shouldRefresh: successful.length > 0 || uncertain.length > 0 };
 }
@@ -510,7 +533,8 @@ async function movimentaTarefas(decisao) {
     jq("body").append(`
       <div id="processingModal" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1); border-radius: 8px; z-index: 100; text-align: center;">
         <p>Processando movimentações...</p>
-        <p id="progressCount">0 / ${totalTasks}</p>
+        <p id="currentTaskNumber">Autenticando...</p>
+        <p id="progressCount">0 / ${totalTasks} concluídas</p>
       </div>
     `);
 
@@ -521,8 +545,11 @@ async function movimentaTarefas(decisao) {
     }
 
     const results = await processTaskBatch(tasks, decisao, authentication.token, {
+      onTaskStart(task, current, total) {
+        jq("#currentTaskNumber").text(`Ticket atual: ${task.taskId} (${current} de ${total})`);
+      },
       onProgress(processed, total) {
-        jq("#progressCount").text(`${processed} / ${total}`);
+        jq("#progressCount").text(`${processed} / ${total} concluídas`);
       }
     });
 
